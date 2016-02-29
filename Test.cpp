@@ -6,11 +6,15 @@
  */
 
 #include<iostream>
-
+#include<time.h>
 #include "MyLdpc.h"
 using namespace std;
 
-void test2() {
+//argv[1]=srcLength,argv[2]=batchSize;
+int main(int argc, char ** argv) {
+	if (argc != 5)
+		return 0;
+	clock_t start, end;
 	const int z = 24;
 	const int ldpcN = z * 24;
 	const int ldpcK = ldpcN / 6 * 5;
@@ -20,8 +24,9 @@ void test2() {
 	Coder coder(ldpcK, ldpcN, rate);
 	srand(time(0));
 
-	const int srcLength = 1000;
-	char * srcCode = (char*) malloc(srcLength*sizeof(char));
+	int srcLength = atoi(argv[1]);
+	//int srcLength = 10;
+	char * srcCode = (char*) malloc(srcLength * sizeof(char));
 	char * priorCode = (char*) malloc(coder.getPriorCodeLength(srcLength));
 	float * postCode = (float*) malloc(
 			coder.getPostCodeLength(srcLength) * sizeof(float));
@@ -30,37 +35,50 @@ void test2() {
 	for (int i = 0; i < srcLength; i++) {
 		srcCode[i] = 'a' + i % 26;
 	}
-
+	double decodeTime;
 	coder.forEncoder();
-	coder.forDecoder(10);
+	coder.forDecoder(atoi(argv[2]));
+	//coder.forDecoder(1);
+	start = clock();
 	coder.encode(srcCode, priorCode, srcLength);
+	end = clock();
+	double encodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+	cout << "encode time=" << encodeTime << endl;
 
+	coder.test(priorCode, postCode, coder.getPriorCodeLength(srcLength),
+			atof(argv[3]));
 
-	coder.test(priorCode, postCode, coder.getPriorCodeLength(srcLength), 0.17);
-	coder.decode(postCode, newSrcCode, srcLength);
-	cout << "srcCode="<<endl;
-	for (int i = 0; i < srcLength; i++) {
-		cout << srcCode[i];
-	}
-	cout << endl;
-	cout << "newSrcCode="<<endl;
-	for (int i = 0; i < srcLength; i++) {
-		cout << newSrcCode[i];
-	}
-	cout << endl;
-
-	for (int i = 0; i < srcLength; i++) {
-		if(newSrcCode[i]!=srcCode[i]){
-			cout << i<<" "<<srcCode[i]<<" "<<newSrcCode[i]<<endl;
+	if (!strcmp(argv[4], "SP")) {
+		coder.addDecodeType(DecodeSP);
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeSP);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "SP:" << decodeTime << endl;
+		int errNum = 0;
+		for (int i = 0; i < srcLength; ++i) {
+			if (srcCode[i] != newSrcCode[i])
+				++errNum;
 		}
+		cout << "ErrNum=" << errNum << endl;
+	} else if (!strcmp(argv[4],"MS")){
+		coder.addDecodeType(DecodeMS);
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeMS);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "MS:" << decodeTime << endl;
+		int errNum = 0;
+		for (int i = 0; i < srcLength; ++i) {
+			if (srcCode[i] != newSrcCode[i])
+				++errNum;
+		}
+		cout << "ErrNum=" << errNum << endl;
 	}
+
 	free(srcCode);
 	free(priorCode);
 	free(postCode);
 	free(newSrcCode);
-}
-
-int main() {
-	test2();
 }
 
