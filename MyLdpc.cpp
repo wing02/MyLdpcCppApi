@@ -28,6 +28,7 @@ Coder::Coder(int ldpcK, int ldpcN, enum rate_type rate) :
 }
 
 Coder::~Coder() {
+	using namespace std;
 	if (isDecoder) {
 		free(hRows);
 		free(hCols);
@@ -35,25 +36,29 @@ Coder::~Coder() {
 		free(hRowNextPtr);
 		free(hColFirstPtr);
 		free(hColNextPtr);
-	}
-	if (isDecodeMS) {
 		free(flagsBool);
 		free(srcBool);
+	}
+	if (isDecodeMS) {
+		cout
+				<< "WriteBuffer\tDecodeInit\tRefreshR\tRefPostP\tCheResult\tReadFlags\tRefreshQ\tReadSrc\t"
+				<< endl;
+		for (int i = 0; i < 8; ++i) {
+			cout << stepTime[i] << "\t";
+		}
+		cout << endl;
 
 	}
 	if (isDecodeSP) {
-		free(flags);
-		free(srcInt);
+		cout
+				<< "WriteBuffer\tDecodeInit\tRefreshR\tRefPostP\tCheResult\tReadFlags\tRefreshQ\tReadSrc\t"
+				<< endl;
+		for (int i = 0; i < 8; ++i) {
+			cout << stepTime[i] << "\t";
+		}
+		cout << endl;
 
 	}
-	using namespace std;
-	cout
-			<< "WriteBuffer\tDecodeInit\tRefreshR\tRefPostP\tCheResult\tReadFlags\tRefreshQ\tReadSrc\t"
-			<< endl;
-	for (int i = 0; i < 8; ++i) {
-		cout << stepTime[i] << "\t";
-	}
-	cout << endl;
 
 }
 int Coder::initCheckMatrix() {
@@ -249,6 +254,24 @@ int Coder::forDecoder(int batchSize) {
 			hColNextPtr);
 	memCodes = cl::Buffer(context, CL_MEM_READ_ONLY,
 			batchSize * ldpcN * sizeof(float), NULL);
+	flagsBool = (bool*) malloc(batchSize * sizeof(bool));
+	memFlagsBool = cl::Buffer(context, CL_MEM_READ_WRITE,
+			batchSize * sizeof(bool),
+			NULL, &errNum);
+	// the src buffer
+	srcBool = (bool*) malloc(batchSize * ldpcN * sizeof(bool));
+	memSrcBool = cl::Buffer(context, CL_MEM_READ_WRITE,
+			batchSize * ldpcN * sizeof(bool), NULL, &errNum);
+	memSrcCode = cl::Buffer(context, CL_MEM_READ_WRITE,
+			batchSize * ldpcK / 8 * sizeof(char), NULL, &errNum);
+
+	memIsDones = cl::Buffer(context, CL_MEM_READ_WRITE,
+			batchSize * sizeof(bool), NULL, &errNum);
+	kerToChar = cl::Kernel(program, "toChar", &errNum);
+	kerToChar.setArg(0, memSrcBool);
+	kerToChar.setArg(1, memSrcCode);
+	kerToChar.setArg(2, sizeof(int), &ldpcN);
+	kerToChar.setArg(3, sizeof(int), &ldpcK);
 
 	return 0;
 }
@@ -271,15 +294,6 @@ int Coder::addDecodeType(enum decodeType deType) {
 		memPriorP1 = cl::Buffer(context, CL_MEM_READ_WRITE,
 				batchSize * ldpcN * sizeof(float), NULL);
 
-		flags = (int*) malloc(batchSize * sizeof(int));
-		memFlags = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * sizeof(int),
-				NULL, &errNum);
-		// the src buffer
-		srcInt = (int*) malloc(batchSize * ldpcN * sizeof(int));
-		memSrc = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * ldpcN * sizeof(int), NULL, &errNum);
-
 		//create kernel
 		kerDecodeInit = cl::Kernel(program, "decodeInit", &errNum);
 		kerRefreshR = cl::Kernel(program, "refreshR", &errNum);
@@ -295,6 +309,7 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerDecodeInit.setArg(5, memPriorP1);
 		kerDecodeInit.setArg(6, sizeof(int), &ldpcN);
 		kerDecodeInit.setArg(7, sizeof(int), &nonZeros);
+		kerDecodeInit.setArg(8, memIsDones);
 
 		kerRefreshR.setArg(0, memHRow);
 		kerRefreshR.setArg(1, memQ0);
@@ -305,6 +320,7 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerRefreshR.setArg(6, memHRowNextPtr);
 		kerRefreshR.setArg(7, sizeof(int), &ldpcM);
 		kerRefreshR.setArg(8, sizeof(int), &nonZeros);
+		kerRefreshR.setArg(9, memIsDones);
 
 		kerRefreshQ.setArg(0, memHCol);
 		kerRefreshQ.setArg(1, memQ0);
@@ -317,8 +333,10 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerRefreshQ.setArg(8, memHColNextPtr);
 		kerRefreshQ.setArg(9, sizeof(int), &ldpcN);
 		kerRefreshQ.setArg(10, sizeof(int), &nonZeros);
+		kerRefreshQ.setArg(11, memFlagsBool);
+		kerRefreshQ.setArg(12, memIsDones);
 
-		kerHardDecision.setArg(0, memSrc);
+		kerHardDecision.setArg(0, memSrcBool);
 		kerHardDecision.setArg(1, memR0);
 		kerHardDecision.setArg(2, memR1);
 		kerHardDecision.setArg(3, memPriorP0);
@@ -327,16 +345,18 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerHardDecision.setArg(6, memHColNextPtr);
 		kerHardDecision.setArg(7, sizeof(int), &ldpcN);
 		kerHardDecision.setArg(8, sizeof(int), &nonZeros);
-		kerHardDecision.setArg(9, memFlags);
+		kerHardDecision.setArg(9, memFlagsBool);
+		kerHardDecision.setArg(10, memIsDones);
 
-		kerCheckResult.setArg(0, memSrc);
+		kerCheckResult.setArg(0, memSrcBool);
 		kerCheckResult.setArg(1, memHCol);
 		kerCheckResult.setArg(2, memHRowFirstPtr);
 		kerCheckResult.setArg(3, memHRowNextPtr);
 		kerCheckResult.setArg(4, sizeof(int), &ldpcM);
 		kerCheckResult.setArg(5, sizeof(int), &ldpcN);
 		kerCheckResult.setArg(6, sizeof(int), &nonZeros);
-		kerCheckResult.setArg(7, memFlags);
+		kerCheckResult.setArg(7, memFlagsBool);
+		kerCheckResult.setArg(8, memIsDones);
 		break;
 	case DecodeMS:
 		isDecodeMS = true;
@@ -349,26 +369,12 @@ int Coder::addDecodeType(enum decodeType deType) {
 				batchSize * nonZeros * sizeof(float), NULL);
 		memLPostP = cl::Buffer(context, CL_MEM_READ_WRITE,
 				batchSize * ldpcN * sizeof(float), NULL);
-		flagsBool = (bool*) malloc(batchSize * sizeof(bool));
-		memFlagsBool = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * sizeof(bool),
-				NULL, &errNum);
-		// the src buffer
-		srcBool = (bool*) malloc(batchSize * ldpcN * sizeof(bool));
-		memSrcBool = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * ldpcN * sizeof(bool), NULL, &errNum);
-		memSrcCode = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * ldpcK / 8 * sizeof(char), NULL, &errNum);
-
-		memIsDones = cl::Buffer(context, CL_MEM_READ_WRITE,
-				batchSize * sizeof(bool), NULL, &errNum);
 		// the flags
 		kerDecodeInitMS = cl::Kernel(program, "decodeInitMS", &errNum);
 		kerRefreshRMS = cl::Kernel(program, "refreshRMS", &errNum);
 		kerRefreshQMS = cl::Kernel(program, "refreshQMS", &errNum);
 		kerRefreshPostPMS = cl::Kernel(program, "refreshPostPMS", &errNum);
 		kerCheckResultMS = cl::Kernel(program, "checkResultMS", &errNum);
-		kerToCharMS = cl::Kernel(program, "toChar", &errNum);
 
 		kerDecodeInitMS.setArg(0, memHCol);
 		kerDecodeInitMS.setArg(1, memCodes);
@@ -418,11 +424,6 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerRefreshQMS.setArg(7, memFlagsBool);
 		kerRefreshQMS.setArg(8, memIsDones);
 
-		kerToCharMS.setArg(0, memSrcBool);
-		kerToCharMS.setArg(1, memSrcCode);
-		kerToCharMS.setArg(2, sizeof(int), &ldpcN);
-		kerToCharMS.setArg(3, sizeof(int), &ldpcK);
-
 		break;
 	case DecodeCPU:
 		break;
@@ -450,7 +451,7 @@ int Coder::encode(char * srcCode, char * priorCode, int srcLength) {
 int Coder::decode(float * postCode, char * srcCode, int srcLength,
 		enum decodeType deType) {
 	if (deType == DecodeCPU) {
-		return decodeNoCL(postCode, srcCode, srcLength);
+		return decodeCPU(postCode, srcCode, srcLength);
 	}
 	int codeSize = getCodeSize(srcLength);
 	for (int offset = 0;; offset += batchSize) {
@@ -540,6 +541,109 @@ int Coder::encodeOnce(char * srcCode, char * priorCode, int srcLength) {
 		}
 	}
 	return LDPC_SUCCESS;
+}
+
+int Coder::decodeCPU(float * postCode, char * srcCode, int srcLength) {
+	memset(srcCode, 0, srcLength);
+	int codeSize = getCodeSize(srcLength);
+	bool* lQA = (bool*) malloc(sizeof(bool) * nonZeros);
+	float* lQB = (float*) malloc(sizeof(float) * nonZeros);
+	float* lR = (float*) malloc(sizeof(float) * nonZeros);
+	float* lPriorP = (float*) malloc(sizeof(float) * ldpcN);
+	float* lPostP = (float*) malloc(sizeof(float) * ldpcN);
+	bool * src = (bool*) malloc(sizeof(bool) * ldpcN);
+	const int times = 20;
+	int time;
+	for (int batch = 0; batch < codeSize; ++batch) {
+		//decodeInitMS
+		time = 0;
+		for (int nodeInd = 0; nodeInd < nonZeros; ++nodeInd) {
+			int hCol = hCols[nodeInd];
+			float code = postCode[batch * ldpcN + hCol];
+			lQA[nodeInd] = (code < 0);
+			lQB[nodeInd] = fabs(code);
+		}
+		while (1) {
+			//refreshRMS
+			for (int nodeInd = 0; nodeInd < nonZeros; ++nodeInd) {
+				int hRow = hRows[nodeInd];
+				bool a = 0;
+				float b = 1000;
+				for (int ptr = hRowFirstPtr[hRow]; ptr != -1; ptr =
+						hRowNextPtr[ptr]) {
+					if (nodeInd == ptr)
+						continue;
+					if (lQA[ptr])
+						a = a ^ 1;
+					b = fmin(b, lQB[ptr]);
+				}
+				if (a)
+					lR[nodeInd] = -b;
+				else
+					lR[nodeInd] = b;
+			}
+			//refreshPostPMS
+			for (int nodeInd = 0; nodeInd < ldpcN; ++nodeInd) {
+				float tmp = postCode[batch * ldpcN + nodeInd];
+				for (int ptr = hColFirstPtr[nodeInd]; ptr != -1; ptr =
+						hColNextPtr[ptr]) {
+					tmp += lR[ptr];
+				}
+				if (tmp > 0) {
+					src[nodeInd] = 0;
+				} else {
+					src[nodeInd] = 1;   //error
+				}
+				lPostP[nodeInd] = tmp;
+			}
+			//checkResult
+			bool flag = 0;
+			for (int nodeInd = 0; nodeInd < ldpcM; ++nodeInd) {
+				bool result = 0;
+				for (int ptr = hRowFirstPtr[nodeInd]; ptr != -1; ptr =
+						hRowNextPtr[ptr]) {
+					//ptr is the node location;
+					if (src[hCols[ptr]])
+						result ^= 1;
+				}
+				if (result) {
+					flag=1;
+					break;
+				}
+			}
+			++time;
+			if (flag==0)
+				break;
+			if (time == times)
+				break;
+			//refreshQ
+			for (int nodeInd = 0; nodeInd < nonZeros; ++nodeInd) {
+				int hCol = hCols[nodeInd];
+				float lQ = lPostP[hCol]-lR[nodeInd];
+				lQA[nodeInd] = (lQ < 0);
+				lQB[nodeInd] = fabs(lQ);
+			}
+		}   //while done
+			//output
+		for (int tmp = 0; tmp < ldpcK; ++tmp) {
+			if (src[tmp]) {
+				int offset = batch * ldpcK + tmp;
+				int charOffset = offset / 8;
+				if (charOffset <= srcLength) {
+					int bitOffset = offset % 8;
+					srcCode[charOffset] |= (1 << bitOffset);
+				}
+			}
+		}
+
+	}
+	free(lQA);
+	free(lQB);
+	free(lPriorP);
+	free(lPostP);
+	free(src);
+	free(lR);
+	return 0;
 }
 
 int Coder::decodeNoCL(float * postCode, char * srcCode, int srcLength) {
@@ -708,7 +812,7 @@ int Coder::decodeOnceMS(float * postCode, char * srcCode, int postCodeLength,
 	const int times = 20;
 	int time = 0;
 	cl::Event eventDecodeInitMS, eventRefreshRMS, eventRefreshQMS,
-			eventRefreshPostPMS, eventCheckResultMS, eventToCharMS;
+			eventRefreshPostPMS, eventCheckResultMS, eventToChar;
 	int batchSizeOnce = postCodeLength / ldpcN;
 	clock_t start;
 
@@ -751,17 +855,18 @@ int Coder::decodeOnceMS(float * postCode, char * srcCode, int postCodeLength,
 		stepTime[4] += (double) (clock() - start) / CLOCKS_PER_SEC;
 
 		start = clock();
-		errNum = queue.enqueueReadBuffer(memFlagsBool, CL_TRUE, 0, batchSizeOnce*sizeof(bool),
-				flagsBool, new std::vector<cl::Event>(1, eventCheckResultMS),
+		errNum = queue.enqueueReadBuffer(memFlagsBool, CL_TRUE, 0,
+				batchSizeOnce * sizeof(bool), flagsBool,
+				new std::vector<cl::Event>(1, eventCheckResultMS),
 				NULL);
 		queue.finish();
 		stepTime[5] += (double) (clock() - start) / CLOCKS_PER_SEC;
 
 		start = clock();
 		++time;
-		int sumFlag=0;
-		for(int i=0;i<batchSizeOnce;++i)
-			if(flagsBool[i])
+		int sumFlag = 0;
+		for (int i = 0; i < batchSizeOnce; ++i)
+			if (flagsBool[i])
 				++sumFlag;
 
 		if (sumFlag == 0)
@@ -776,13 +881,13 @@ int Coder::decodeOnceMS(float * postCode, char * srcCode, int postCodeLength,
 
 		start = clock();
 	}
-	cout<<"Time="<<time<<endl;
-	errNum = queue.enqueueNDRangeKernel(kerToCharMS, cl::NullRange,
+	cout << "Time=" << time << endl;
+	errNum = queue.enqueueNDRangeKernel(kerToChar, cl::NullRange,
 			cl::NDRange(batchSizeOnce, ldpcK / 8), cl::NullRange, NULL,
-			&eventToCharMS);
+			&eventToChar);
 	errNum = queue.enqueueReadBuffer(memSrcCode, CL_TRUE, 0,
 			srcLength * sizeof(char), srcCode,
-			new std::vector<cl::Event>(1, eventToCharMS), NULL);
+			new std::vector<cl::Event>(1, eventToChar), NULL);
 	queue.finish();
 	stepTime[7] += (double) (clock() - start) / CLOCKS_PER_SEC;
 
@@ -797,7 +902,7 @@ int Coder::decodeOnceSP(float * postCode, char * srcCode, int postCodeLength,
 	int sumFlag = 1;
 	clock_t start;
 	cl::Event eventDecodeInit, eventRefreshR, eventRefreshQ, eventHardDecision,
-			eventCheckResult;
+			eventCheckResult, eventToChar;
 	int batchSizeOnce = postCodeLength / ldpcN;
 
 	start = clock();
@@ -838,8 +943,8 @@ int Coder::decodeOnceSP(float * postCode, char * srcCode, int postCodeLength,
 		stepTime[4] += (double) (clock() - start) / CLOCKS_PER_SEC;
 
 		start = clock();
-		errNum = queue.enqueueReadBuffer(memFlags, CL_TRUE, 0,
-				batchSizeOnce * sizeof(int), flags,
+		errNum = queue.enqueueReadBuffer(memFlagsBool, CL_TRUE, 0,
+				batchSizeOnce * sizeof(bool), flagsBool,
 				new std::vector<cl::Event>(1, eventCheckResult), NULL);
 		queue.finish();
 		stepTime[5] += (double) (clock() - start) / CLOCKS_PER_SEC;
@@ -847,7 +952,7 @@ int Coder::decodeOnceSP(float * postCode, char * srcCode, int postCodeLength,
 		start = clock();
 		sumFlag = 0;
 		for (int i = 0; i < batchSizeOnce; ++i) {
-			sumFlag += flags[i];
+			sumFlag += flagsBool[i];
 		}
 		++time;
 		if (sumFlag == 0)
@@ -862,26 +967,16 @@ int Coder::decodeOnceSP(float * postCode, char * srcCode, int postCodeLength,
 
 		start = clock();
 	}
-	errNum = queue.enqueueReadBuffer(memSrc, CL_TRUE, 0,
-			batchSizeOnce * ldpcN * sizeof(int), srcInt, NULL, NULL);
+	cout << "Time=" << time << endl;
+	errNum = queue.enqueueNDRangeKernel(kerToChar, cl::NullRange,
+			cl::NDRange(batchSizeOnce, ldpcK / 8), cl::NullRange, NULL,
+			&eventToChar);
+	errNum = queue.enqueueReadBuffer(memSrcCode, CL_TRUE, 0,
+			srcLength * sizeof(char), srcCode,
+			new std::vector<cl::Event>(1, eventToChar), NULL);
 	queue.finish();
 	stepTime[7] += (double) (clock() - start) / CLOCKS_PER_SEC;
 
-	//cout << "time=" << time << endl;
-	memset(srcCode, 0, srcLength);
-	for (int bat = 0; bat < batchSizeOnce; ++bat) {
-		for (int tmp = 0; tmp < ldpcK; ++tmp) {
-			if (srcInt[bat * ldpcN + tmp]) {
-				int offset = bat * ldpcK + tmp;
-				int charOffset = offset / 8;
-				if (charOffset < srcLength) {
-					int bitOffset = offset % 8;
-					srcCode[charOffset] |= (1 << bitOffset);
-				}
-			}
-
-		}
-	}
 	return LDPC_SUCCESS;
 }
 

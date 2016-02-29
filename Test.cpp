@@ -74,6 +74,18 @@ int main(int argc, char ** argv) {
 				++errNum;
 		}
 		cout << "ErrNum=" << errNum << endl;
+	} else if (!strcmp(argv[4],"CPU")){
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeCPU);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "CPU:" << decodeTime << endl;
+		int errNum = 0;
+		for (int i = 0; i < srcLength; ++i) {
+			if (srcCode[i] != newSrcCode[i])
+				++errNum;
+		}
+		cout << "ErrNum=" << errNum << endl;
 	}
 
 	free(srcCode);

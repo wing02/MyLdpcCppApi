@@ -135,6 +135,7 @@ private:
 	int decodeOnceMS(float * postCode, char * src, int postCodeLength,
 			int srcLength);
 	int decodeNoCL(float * postCode, char * srcCode, int srcLength);
+	int decodeCPU(float * postCode, char * srcCode, int srcLength);
 	int srcLength;
 	int codeLength;
 	int ldpcK;
@@ -143,9 +144,6 @@ private:
 	int z;
 	int nonZeros;
 	int batchSize;
-	int *flags;
-	//int *outputFlags;
-	int *srcInt;
 
 	bool isEncoder, isDecoder,isDecodeMS,isDecodeSP;
 
@@ -190,8 +188,6 @@ private:
 	cl::Buffer memHColNextPtr;
 
 	cl::Buffer memCodes;
-	cl::Buffer memSrc;
-	cl::Buffer memFlags;
 
 	cl::Buffer memLPostP;
 	cl::Buffer memLR;
@@ -202,7 +198,6 @@ private:
 	cl::Buffer memFlagsBool;
 	cl::Buffer memSrcCode;
 	cl::Buffer memIsDones;
-	cl::Buffer memSumFlag;
 
 	//create kernel
 	cl::Kernel kerDecodeInit;
@@ -216,7 +211,7 @@ private:
 	cl::Kernel kerRefreshQMS;
 	cl::Kernel kerRefreshPostPMS;
 	cl::Kernel kerCheckResultMS;
-	cl::Kernel kerToCharMS;
+	cl::Kernel kerToChar;
 
 };
 

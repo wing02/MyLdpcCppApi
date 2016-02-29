@@ -1,4 +1,4 @@
-kernel void decodeInit(global int* hCols,global float* codes,global float* q0,global float* q1,global float* priorP0,global float* priorP1,const int ldpcN,const int nonZeros){
+kernel void decodeInit(global int* hCols,global float* codes,global float* q0,global float* q1,global float* priorP0,global float* priorP1,const int ldpcN,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
     int nodeInd=get_global_id(1);//nonZeros
     //get the thread's and hCol;
@@ -14,11 +14,16 @@ kernel void decodeInit(global int* hCols,global float* codes,global float* q0,gl
         priorP0[batchInd*ldpcN+nodeInd]=tmp/(1+tmp);
         priorP1[batchInd*ldpcN+nodeInd]=1/(1+tmp);
     }
+    if(nodeInd==ldpcN){
+        isDones[batchInd]=0;
+    }
 }
 
 
-kernel void refreshR(global int* hRows,global float* q0,global float* q1, global float* r0,global float* r1,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int nonZeros){
+kernel void refreshR(global int* hRows,global float* q0,global float* q1, global float* r0,global float* r1,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
     int nodeInd=get_global_id(1);//nonZeros
     int hRow=hRows[nodeInd];//0-ldpcM
     //int hCol=hCols[nodeInd];//0-ldpcN
@@ -33,9 +38,13 @@ kernel void refreshR(global int* hRows,global float* q0,global float* q1, global
     r1[batchInd*nonZeros+nodeInd]=(1-dTmp)/2;
 }
 
-kernel void refreshQ(global int* hCols,global float* q0,global float* q1,global float* r0,global float* r1,global float* priorP0,global float* priorP1,global int* hColFirstPtr,global int* hColNextPtr,const int ldpcN, const int nonZeros){
+kernel void refreshQ(global int* hCols,global float* q0,global float* q1,global float* r0,global float* r1,global float* priorP0,global float* priorP1,global int* hColFirstPtr,global int* hColNextPtr,const int ldpcN, const int nonZeros,global bool* flags,global bool* isDones){
     int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
     int nodeInd=get_global_id(1);//nonZeros
+    if(nodeInd==0&&flags[batchInd]==0)
+        isDones[batchInd]=1;
     int hCol=hCols[nodeInd];
     float tmp0,tmp1;
     tmp0=priorP0[batchInd*ldpcN+hCol];
@@ -50,8 +59,10 @@ kernel void refreshQ(global int* hCols,global float* q0,global float* q1,global 
     q1[batchInd*nonZeros+nodeInd]=tmp1/(tmp0+tmp1);
 }
 
-kernel void hardDecision(global int* src,global float* r0,global float* r1,global float* priorP0,global float* priorP1,global int* hColFirstPtr,global int* hColNextPtr,const int ldpcN,const int nonZeros,global int* flags){
+kernel void hardDecision(global bool* srcBool,global float* r0,global float* r1,global float* priorP0,global float* priorP1,global int* hColFirstPtr,global int* hColNextPtr,const int ldpcN,const int nonZeros,global bool* flags,global bool* isDones){
     int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
     int col=get_global_id(1);//nonZeros
     float tmp0,tmp1;
     //only create batchSize*ldpcN thread;
@@ -63,30 +74,30 @@ kernel void hardDecision(global int* src,global float* r0,global float* r1,globa
             tmp1*=r1[batchInd*nonZeros+ptr];
         }
         if(tmp0>tmp1){
-            src[batchInd*ldpcN+col]=0;
+            srcBool[batchInd*ldpcN+col]=0;
         }else if (tmp0<tmp1){
-            src[batchInd*ldpcN+col]=1;
-        }else{
-            src[batchInd*ldpcN+col]=-1;//error
+            srcBool[batchInd*ldpcN+col]=1;
         }
     }else if (col==ldpcN){//init the flags
         flags[batchInd]=0;
     }
 }
 
-kernel void checkResult(global int* src,global int* hCols,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int ldpcN,const int nonZeros,global int* flags){
+kernel void checkResult(global bool* srcBool,global int* hCols,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int ldpcN,const int nonZeros,global bool* flags,global bool* isDones){
     int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
     int nodeInd=get_global_id(1);//nonZeros
     if(nodeInd<ldpcM){//nodeInd = row;
         //init the matrixM to 0;
-        int result=0;
-        int row=nodeInd;
-        for(int ptr=hRowFirstPtr[row];ptr!=-1;ptr=hRowNextPtr[ptr]){
+        bool result=0;
+        for(int ptr=hRowFirstPtr[nodeInd];ptr!=-1;ptr=hRowNextPtr[ptr]){
             //ptr is the node location;
-            result+=src[batchInd*ldpcN+hCols[ptr]];
+            if(srcBool[batchInd*ldpcN+hCols[ptr]])
+                result ^=1;
         }
-        if(result%2!=0){
-            atomic_inc(&flags[batchInd]);
+        if(result){
+            flags[batchInd]=1;
         }
     }
 }
