@@ -22,7 +22,7 @@ int main(int argc, char ** argv) {
 	const enum rate_type rate = rate_5_6;
 
 	Coder coder(ldpcK, ldpcN, rate);
-	srand(time(0));
+	//srand(time(0));
 
 	int srcLength = atoi(argv[1]);
 	//int srcLength = 10;
@@ -75,11 +75,26 @@ int main(int argc, char ** argv) {
 		}
 		cout << "ErrNum=" << errNum << endl;
 	} else if (!strcmp(argv[4],"CPU")){
+		coder.addDecodeType(DecodeCPU);
+		start = clock();
 		start = clock();
 		coder.decode(postCode, newSrcCode, srcLength, DecodeCPU);
 		end = clock();
 		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 		cout << "CPU:" << decodeTime << endl;
+		int errNum = 0;
+		for (int i = 0; i < srcLength; ++i) {
+			if (srcCode[i] != newSrcCode[i])
+				++errNum;
+		}
+		cout << "ErrNum=" << errNum << endl;
+	} else if (!strcmp(argv[4],"TDMP")){
+		coder.addDecodeType(DecodeTDMP);
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeTDMP);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "TDMP:" << decodeTime << endl;
 		int errNum = 0;
 		for (int i = 0; i < srcLength; ++i) {
 			if (srcCode[i] != newSrcCode[i])

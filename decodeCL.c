@@ -1,3 +1,5 @@
+
+
 kernel void decodeInit(global int* hCols,global float* codes,global float* q0,global float* q1,global float* priorP0,global float* priorP1,const int ldpcN,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
     int nodeInd=get_global_id(1);//nonZeros
@@ -96,14 +98,18 @@ kernel void checkResult(global bool* srcBool,global int* hCols,global int* hRowF
             if(srcBool[batchInd*ldpcN+hCols[ptr]])
                 result ^=1;
         }
+        if(flags[batchInd])
+            return;
         if(result){
             flags[batchInd]=1;
         }
     }
+
 }
 
 //SM----------------------------------------------------------------------------------------------------------------------------
 
+//decodeInit MS 
 kernel void decodeInitMS(global int* hCols,global float* postCodes,global bool* lQA,global float* lQB,const int ldpcN,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
     int nodeInd=get_global_id(1);//nonZeros
@@ -161,6 +167,8 @@ kernel void refreshPostPMS(global bool* srcBool,global float* lR,global float* p
     }else if (nodeInd==ldpcN){//init the flags
         flags[batchInd]=0;
     }
+
+    
 }
 
 kernel void checkResultMS(global bool* srcBool,global int* hCols,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int ldpcN,const int nonZeros,global bool* flags,global bool* isDones){
@@ -213,4 +221,105 @@ kernel void toChar(global bool* srcBool,global char* srcCode,const int ldpcN,con
             }
         }
     }
+}
+
+
+//TDMP-------------------------------------------------------------------------------------------
+kernel void decodeInitTDMP(global int* hCols,global float* postCodes,global float* lQ,const int ldpcN,const int nonZeros,global bool* isDones,global float* lPostP,const int blockHeavy,global float* lR){
+    int batchInd=get_global_id(0);
+    int nodeInd=get_global_id(1);//ldpcN+1
+    //get the thread's and hCol;
+    if(nodeInd<blockHeavy){
+        int hCol=hCols[nodeInd];//0-ldpcN
+        float code=postCodes[batchInd*ldpcN+hCol];
+        lQ[batchInd*blockHeavy+nodeInd]=code;
+    }
+    // init the priorP,the offset is different;
+    if(nodeInd<ldpcN){
+        float code=postCodes[batchInd*ldpcN+nodeInd];
+        lPostP[batchInd*ldpcN+nodeInd]=code;
+
+        //set lr to zero
+        for(int i=nodeInd;i<nonZeros;i+=ldpcN)
+            lR[batchInd*nonZeros+i]=0;
+    }
+    else if(nodeInd==ldpcN){
+        isDones[batchInd]=0;
+    }
+
+}
+
+kernel void refreshRTDMP(global int* hRows,global float* lQ, global float* lR,global int* hRowFirstPtr,global int* hRowNextPtr,const int nonZeros,global bool* isDones,const int blockHeavy,const int offset){
+    int batchInd=get_global_id(0);
+    int nodeInd=get_global_id(1);//blockHeavy
+    if(isDones[batchInd])
+        return;
+    if(nodeInd<blockHeavy){
+        int newNodeInd=nodeInd+offset;
+        int hRow=hRows[newNodeInd];
+
+        bool a=0;
+        float b=1000;
+        for(int ptr=hRowFirstPtr[hRow];ptr!=-1;ptr=hRowNextPtr[ptr]){
+            if(newNodeInd==ptr)
+                continue;
+            //ptr is the node location;
+            if(lQ[batchInd*blockHeavy+ptr-offset]<0)
+                a=a^1;
+            b=fmin(b,fabs(lQ[batchInd*blockHeavy+ptr-offset]));
+        }
+        if(a)
+            lR[batchInd*nonZeros+newNodeInd]=-b;
+        else
+            lR[batchInd*nonZeros+newNodeInd]=b;
+    }
+    //if(nodeInd==0&& batchInd==0){
+    //    printf("offset=%d\n",offset);
+    //    for(int i=0;i<100;++i)
+    //        printf("%f ",lR[i]);
+    //    printf("Refresh R\n");
+    //}
+}
+
+kernel void refreshPostPTDMP(global float* lR,global float* lQ,global float* lPostP,global int* hCols,const int ldpcN,const int nonZeros,global bool* isDones,const int blockHeavy,const int offset){
+    int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
+    int nodeInd=get_global_id(1);//threadNum , <blockHeavy
+    int hCol=hCols[nodeInd+offset];
+    //only create batchSize*ldpcN thread;
+    lPostP[batchInd*ldpcN+hCol]=lQ[batchInd*blockHeavy+nodeInd]+lR[batchInd*nonZeros+nodeInd+offset];
+        
+}
+
+kernel void hardDecisionTDMP(global float* lPostP,global bool* srcBool,global bool* flags,const int ldpcN,global bool* isDones){
+    int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
+    int nodeInd=get_global_id(1);//nonZeros ,only need ldpcN
+    float tmp;
+    //only create batchSize*ldpcN thread;
+    if(nodeInd<ldpcN){
+        tmp=lPostP[batchInd*ldpcN+nodeInd];
+        if(tmp>0){
+            srcBool[batchInd*ldpcN+nodeInd]=0;
+        }else if(tmp<0){
+            srcBool[batchInd*ldpcN+nodeInd]=1;
+        }else if(tmp==0){
+            //printf("Error in hardDecision\n");
+        }
+    }else if (nodeInd==ldpcN){//init the flags
+        flags[batchInd]=0;
+    }
+}
+
+
+kernel void refreshQTDMP(global int* hCols,global float* lQ,global float* lR,global float* lPostP,const int ldpcN, const int nonZeros,global bool* flags,global bool* isDones,const int blockHeavy,const int offset){
+    int batchInd=get_global_id(0);
+    if(isDones[batchInd])
+        return;
+    int nodeInd=get_global_id(1);//nonZeros
+    int newNodeInd=nodeInd+offset;
+    int hCol=hCols[newNodeInd];
+    lQ[batchInd*blockHeavy+nodeInd]=lPostP[batchInd*ldpcN+hCol]-lR[batchInd*nonZeros+newNodeInd];
 }

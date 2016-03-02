@@ -65,7 +65,6 @@ int Coder::initCheckMatrix() {
 	using namespace Eigen;
 	//he expansion factor (z factor) is equal to n/24 for priorCode length n;
 	z = ldpcN / n_b;
-	const char * hSeed;
 	int seedRowLength;
 	const int seedColLength = n_b;
 	switch (rate) {
@@ -170,11 +169,14 @@ int Coder::forDecoder(int batchSize) {
 
 	hCols = (int*) malloc(nonZeros * sizeof(int));
 	hRows = (int*) malloc(nonZeros * sizeof(int));
+
+	hRowRange = (int*) malloc((ldpcM + 1) * sizeof(int));
 	//init the hColPtr and hRowPtr;value is the offset in nonZeros,r0,r1 and so on;
 	int offset = 0;
 	for (int k = 0; k < checkMatrix.outerSize(); ++k) {
-		for (SparseMatrix<DataType>::InnerIterator it(checkMatrix, k); it;
-				++it) {
+		hRowRange[k] = offset;
+		for (SparseMatrix<DataType, RowMajor>::InnerIterator it(checkMatrix, k);
+				it; ++it) {
 			//set thre adjacency links
 			int row = it.row();
 			int col = it.col();
@@ -204,6 +206,7 @@ int Coder::forDecoder(int batchSize) {
 			++offset;
 		}
 	}
+	hRowRange[ldpcM] = offset;
 
 	nonZeros = checkMatrix.nonZeros();
 	//create platform
@@ -273,6 +276,16 @@ int Coder::forDecoder(int batchSize) {
 	kerToChar.setArg(2, sizeof(int), &ldpcN);
 	kerToChar.setArg(3, sizeof(int), &ldpcK);
 
+	kerCheckResult = cl::Kernel(program, "checkResult", &errNum);
+	kerCheckResult.setArg(0, memSrcBool);
+	kerCheckResult.setArg(1, memHCol);
+	kerCheckResult.setArg(2, memHRowFirstPtr);
+	kerCheckResult.setArg(3, memHRowNextPtr);
+	kerCheckResult.setArg(4, sizeof(int), &ldpcM);
+	kerCheckResult.setArg(5, sizeof(int), &ldpcN);
+	kerCheckResult.setArg(6, sizeof(int), &nonZeros);
+	kerCheckResult.setArg(7, memFlagsBool);
+	kerCheckResult.setArg(8, memIsDones);
 	return 0;
 }
 int Coder::addDecodeType(enum decodeType deType) {
@@ -299,7 +312,6 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerRefreshR = cl::Kernel(program, "refreshR", &errNum);
 		kerRefreshQ = cl::Kernel(program, "refreshQ", &errNum);
 		kerHardDecision = cl::Kernel(program, "hardDecision", &errNum);
-		kerCheckResult = cl::Kernel(program, "checkResult", &errNum);
 		//set kernel argument
 		kerDecodeInit.setArg(0, memHCol);
 		kerDecodeInit.setArg(1, memCodes);
@@ -348,15 +360,6 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerHardDecision.setArg(9, memFlagsBool);
 		kerHardDecision.setArg(10, memIsDones);
 
-		kerCheckResult.setArg(0, memSrcBool);
-		kerCheckResult.setArg(1, memHCol);
-		kerCheckResult.setArg(2, memHRowFirstPtr);
-		kerCheckResult.setArg(3, memHRowNextPtr);
-		kerCheckResult.setArg(4, sizeof(int), &ldpcM);
-		kerCheckResult.setArg(5, sizeof(int), &ldpcN);
-		kerCheckResult.setArg(6, sizeof(int), &nonZeros);
-		kerCheckResult.setArg(7, memFlagsBool);
-		kerCheckResult.setArg(8, memIsDones);
 		break;
 	case DecodeMS:
 		isDecodeMS = true;
@@ -374,7 +377,7 @@ int Coder::addDecodeType(enum decodeType deType) {
 		kerRefreshRMS = cl::Kernel(program, "refreshRMS", &errNum);
 		kerRefreshQMS = cl::Kernel(program, "refreshQMS", &errNum);
 		kerRefreshPostPMS = cl::Kernel(program, "refreshPostPMS", &errNum);
-		kerCheckResultMS = cl::Kernel(program, "checkResultMS", &errNum);
+		kerCheckResultMS = cl::Kernel(program, "checkResult", &errNum);
 
 		kerDecodeInitMS.setArg(0, memHCol);
 		kerDecodeInitMS.setArg(1, memCodes);
@@ -427,6 +430,69 @@ int Coder::addDecodeType(enum decodeType deType) {
 		break;
 	case DecodeCPU:
 		break;
+	case DecodeTDMP:
+		blockHeavy = ldpcN;
+
+		memLR = cl::Buffer(context, CL_MEM_READ_WRITE,
+				batchSize * nonZeros * sizeof(float), NULL);
+		memLQ = cl::Buffer(context, CL_MEM_READ_WRITE,
+				batchSize * blockHeavy * sizeof(float), NULL);
+		memLPostP = cl::Buffer(context, CL_MEM_READ_WRITE,
+				batchSize * ldpcN * sizeof(float), NULL);
+		// the flags
+		kerDecodeInit = cl::Kernel(program, "decodeInitTDMP", &errNum);
+		kerRefreshR = cl::Kernel(program, "refreshRTDMP", &errNum);
+		kerRefreshQ = cl::Kernel(program, "refreshQTDMP", &errNum);
+		kerRefreshPostP = cl::Kernel(program, "refreshPostPTDMP", &errNum);
+		kerHardDecision = cl::Kernel(program, "hardDecisionTDMP", &errNum);
+
+		kerDecodeInit.setArg(0, memHCol);
+		kerDecodeInit.setArg(1, memCodes);
+		kerDecodeInit.setArg(2, memLQ);
+		kerDecodeInit.setArg(3, sizeof(int), &ldpcN);
+		kerDecodeInit.setArg(4, sizeof(int), &nonZeros);
+		kerDecodeInit.setArg(5, memIsDones);
+		kerDecodeInit.setArg(6, memLPostP);
+		kerDecodeInit.setArg(7, sizeof(int), &blockHeavy);
+		kerDecodeInit.setArg(8, memLR);
+
+		kerRefreshR.setArg(0, memHRow);
+		kerRefreshR.setArg(1, memLQ);
+		kerRefreshR.setArg(2, memLR);
+		kerRefreshR.setArg(3, memHRowFirstPtr);
+		kerRefreshR.setArg(4, memHRowNextPtr);
+		kerRefreshR.setArg(5, sizeof(int), &nonZeros);
+		kerRefreshR.setArg(6, memIsDones);
+		kerRefreshR.setArg(7, sizeof(int), &blockHeavy);
+		//kerRefreshR.setArg(8, sizeof(int,&offset);
+
+		kerRefreshPostP.setArg(0, memLR);
+		kerRefreshPostP.setArg(1, memLQ);
+		kerRefreshPostP.setArg(2, memLPostP);
+		kerRefreshPostP.setArg(3, memHCol);
+		kerRefreshPostP.setArg(4, sizeof(int), &ldpcN);
+		kerRefreshPostP.setArg(5, sizeof(int), &nonZeros);
+		kerRefreshPostP.setArg(6, memIsDones);
+		kerRefreshPostP.setArg(7, sizeof(int), &blockHeavy);
+		//kerRefreshPostP.setArg(8, sizeof(int),&offset);
+
+		kerRefreshQ.setArg(0, memHCol);
+		kerRefreshQ.setArg(1, memLQ);
+		kerRefreshQ.setArg(2, memLR);
+		kerRefreshQ.setArg(3, memLPostP);
+		kerRefreshQ.setArg(4, sizeof(int), &ldpcN);
+		kerRefreshQ.setArg(5, sizeof(int), &nonZeros);
+		kerRefreshQ.setArg(6, memFlagsBool);
+		kerRefreshQ.setArg(7, memIsDones);
+		kerRefreshQ.setArg(8, sizeof(int), &blockHeavy);
+		//kerRefreshQ.setArg(9, sizeof(int),&offset);
+
+		kerHardDecision.setArg(0,memLPostP);
+		kerHardDecision.setArg(1,memSrcBool);
+		kerHardDecision.setArg(2,memFlagsBool);
+		kerHardDecision.setArg(3,sizeof(int),&ldpcN);
+		kerHardDecision.setArg(4,memIsDones);
+		break;
 	}
 	return LDPC_SUCCESS;
 }
@@ -464,6 +530,9 @@ int Coder::decode(float * postCode, char * srcCode, int srcLength,
 			else if (deType == DecodeSP)
 				decodeOnceSP(&postCode[offset * ldpcN],
 						&srcCode[offset * ldpcK / 8], bat * ldpcN, srcL);
+			else if (deType == DecodeTDMP)
+				decodeOnceTDMP(&postCode[offset * ldpcN],
+						&srcCode[offset * ldpcK / 8], bat * ldpcN, srcL);
 		} else { //is the last
 			int bat = codeSize - offset;
 			int srcL = srcLength - offset * ldpcK / 8;
@@ -472,6 +541,9 @@ int Coder::decode(float * postCode, char * srcCode, int srcLength,
 						&srcCode[offset * ldpcK / 8], bat * ldpcN, srcL);
 			else if (deType == DecodeSP)
 				decodeOnceSP(&postCode[offset * ldpcN],
+						&srcCode[offset * ldpcK / 8], bat * ldpcN, srcL);
+			else if (deType == DecodeTDMP)
+				decodeOnceTDMP(&postCode[offset * ldpcN],
 						&srcCode[offset * ldpcK / 8], bat * ldpcN, srcL);
 			break;
 		}
@@ -607,19 +679,19 @@ int Coder::decodeCPU(float * postCode, char * srcCode, int srcLength) {
 						result ^= 1;
 				}
 				if (result) {
-					flag=1;
+					flag = 1;
 					break;
 				}
 			}
 			++time;
-			if (flag==0)
+			if (flag == 0)
 				break;
 			if (time == times)
 				break;
 			//refreshQ
 			for (int nodeInd = 0; nodeInd < nonZeros; ++nodeInd) {
 				int hCol = hCols[nodeInd];
-				float lQ = lPostP[hCol]-lR[nodeInd];
+				float lQ = lPostP[hCol] - lR[nodeInd];
 				lQA[nodeInd] = (lQ < 0);
 				lQB[nodeInd] = fabs(lQ);
 			}
@@ -881,7 +953,7 @@ int Coder::decodeOnceMS(float * postCode, char * srcCode, int postCodeLength,
 
 		start = clock();
 	}
-	cout << "Time=" << time << endl;
+	//cout << "Time=" << time << endl;
 	errNum = queue.enqueueNDRangeKernel(kerToChar, cl::NullRange,
 			cl::NDRange(batchSizeOnce, ldpcK / 8), cl::NullRange, NULL,
 			&eventToChar);
@@ -894,6 +966,96 @@ int Coder::decodeOnceMS(float * postCode, char * srcCode, int postCodeLength,
 	return LDPC_SUCCESS;
 }
 
+int Coder::decodeOnceTDMP(float * postCode, char * srcCode, int postCodeLength,
+		int srcLength) {
+	using namespace std;
+	const int times = 4;
+	int time = 0;
+	cl::Event eventDecodeInit, eventRefreshR, eventRefreshQ, eventRefreshPostP,
+			eventCheckResult, eventToChar,eventHardDecision;
+	int batchSizeOnce = postCodeLength / ldpcN;
+
+	errNum = queue.enqueueWriteBuffer(memCodes, CL_TRUE, 0,
+			postCodeLength * sizeof(float), postCode, NULL, NULL);
+	queue.finish();
+
+	queue.enqueueNDRangeKernel(kerDecodeInit, cl::NullRange,
+			cl::NDRange(batchSizeOnce, ldpcN + 1), cl::NullRange, NULL,
+			&eventRefreshQ);   //actually is eventDecodeInit;
+	queue.finish();
+
+	int offset = 0;
+	int blockRow = 0;
+	int threadNum;
+	threadNum = hRowRange[blockRow + z] - hRowRange[blockRow];
+	while (1) {
+
+		kerRefreshR.setArg(8, sizeof(int), &offset);
+		queue.enqueueNDRangeKernel(kerRefreshR, cl::NullRange,
+				cl::NDRange(batchSizeOnce, threadNum), cl::NullRange,
+				new std::vector<cl::Event>(1, eventRefreshQ), &eventRefreshR);
+		queue.finish();
+
+		kerRefreshPostP.setArg(8, sizeof(int), &offset);
+		queue.enqueueNDRangeKernel(kerRefreshPostP, cl::NullRange,
+				cl::NDRange(batchSizeOnce, threadNum), cl::NullRange,
+				new std::vector<cl::Event>(1, eventRefreshR),
+				&eventRefreshPostP);
+		queue.finish();
+
+		++blockRow;
+		offset += threadNum;
+		if (blockRow == ldpcM / z) {
+			queue.enqueueNDRangeKernel(kerHardDecision, cl::NullRange,
+					cl::NDRange(batchSizeOnce, ldpcN+1), cl::NullRange,
+					new std::vector<cl::Event>(1, eventRefreshPostP),
+					&eventHardDecision);
+			queue.finish();
+
+			queue.enqueueNDRangeKernel(kerCheckResult, cl::NullRange,
+					cl::NDRange(batchSizeOnce, ldpcM), cl::NullRange,
+					new std::vector<cl::Event>(1, eventHardDecision),
+					&eventCheckResult);
+			queue.finish();
+
+			errNum = queue.enqueueReadBuffer(memFlagsBool, CL_TRUE, 0,
+					batchSizeOnce * sizeof(bool), flagsBool,
+					new std::vector<cl::Event>(1, eventCheckResult),
+					NULL);
+			queue.finish();
+
+			++time;
+			int sumFlag = 0;
+			for (int i = 0; i < batchSizeOnce; ++i)
+				if (flagsBool[i])
+					++sumFlag;
+
+			if (sumFlag == 0)
+				break;
+			if (time == times)
+				break;
+			blockRow = 0;
+			offset = 0;
+		}
+		threadNum = hRowRange[blockRow + z] - hRowRange[blockRow];
+		kerRefreshQ.setArg(9, sizeof(int), &offset);
+		queue.enqueueNDRangeKernel(kerRefreshQ, cl::NullRange,
+				cl::NDRange(batchSizeOnce, threadNum), cl::NullRange, NULL,
+				&eventRefreshQ);
+		queue.finish();
+
+	}
+	//cout << "Time=" << time << endl;
+	errNum = queue.enqueueNDRangeKernel(kerToChar, cl::NullRange,
+			cl::NDRange(batchSizeOnce, ldpcK / 8), cl::NullRange, NULL,
+			&eventToChar);
+	errNum = queue.enqueueReadBuffer(memSrcCode, CL_TRUE, 0,
+			srcLength * sizeof(char), srcCode,
+			new std::vector<cl::Event>(1, eventToChar), NULL);
+	queue.finish();
+
+	return LDPC_SUCCESS;
+}
 int Coder::decodeOnceSP(float * postCode, char * srcCode, int postCodeLength,
 		int srcLength) {
 	using namespace std;
