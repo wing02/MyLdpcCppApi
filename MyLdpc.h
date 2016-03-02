@@ -127,6 +127,7 @@ public:
 
 	Eigen::SparseMatrix<DataType,Eigen::RowMajor> checkMatrix;
 private:
+	int times;
 	const char * hSeed;
 	double stepTime[10];
 	int initCheckMatrix();
@@ -196,8 +197,6 @@ private:
 
 	cl::Buffer memLPostP;
 	cl::Buffer memLR;
-	cl::Buffer memLQA;
-	cl::Buffer memLQB;
 	cl::Buffer memLQ;
 
 	cl::Buffer memSrcBool;
@@ -220,6 +219,7 @@ private:
 	cl::Kernel kerRefreshPostPMS;
 	cl::Kernel kerCheckResultMS;
 	cl::Kernel kerToChar;
+	cl::Kernel kerCheckDones;
 
 	cl::Kernel kerRefreshPostP;
 

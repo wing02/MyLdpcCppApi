@@ -110,20 +110,19 @@ kernel void checkResult(global bool* srcBool,global int* hCols,global int* hRowF
 //SM----------------------------------------------------------------------------------------------------------------------------
 
 //decodeInit MS 
-kernel void decodeInitMS(global int* hCols,global float* postCodes,global bool* lQA,global float* lQB,const int ldpcN,const int nonZeros,global bool* isDones){
+kernel void decodeInitMS(global int* hCols,global float* postCodes,global float* lQ,const int ldpcN,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
     int nodeInd=get_global_id(1);//nonZeros
     //get the thread's and hCol;
     int hCol=hCols[nodeInd];//0-ldpcN
     float code=postCodes[batchInd*ldpcN+hCol];
-    lQA[batchInd*nonZeros+nodeInd]=(code<0);
-    lQB[batchInd*nonZeros+nodeInd]=fabs(code);
+    lQ[batchInd*nonZeros+nodeInd]=code;
     // init the priorP,the offset is different;
     if(nodeInd==0)
         isDones[batchInd]=0;
 }
 
-kernel void refreshRMS(global int* hRows,global bool* lQA,global float* lQB, global float* lR,global int* hRowFirstPtr,global int* hRowNextPtr,const int nonZeros,global bool* isDones){
+kernel void refreshRMS(global int* hRows,global float* lQ, global float* lR,global int* hRowFirstPtr,global int* hRowNextPtr,const int nonZeros,global bool* isDones){
     int batchInd=get_global_id(0);
     if(isDones[batchInd])
         return;
@@ -136,9 +135,9 @@ kernel void refreshRMS(global int* hRows,global bool* lQA,global float* lQB, glo
         if(nodeInd==ptr)
             continue;
         //ptr is the node location;
-        if(lQA[batchInd*nonZeros+ptr])
+        if(lQ[batchInd*nonZeros+ptr]<0)
             a=a^1;
-        b=fmin(b,lQB[batchInd*nonZeros+ptr]);
+        b=fmin(b,fabs(lQ[batchInd*nonZeros+ptr]));
     }
     if(a)
         lR[batchInd*nonZeros+nodeInd]=-b;
@@ -171,30 +170,9 @@ kernel void refreshPostPMS(global bool* srcBool,global float* lR,global float* p
     
 }
 
-kernel void checkResultMS(global bool* srcBool,global int* hCols,global int* hRowFirstPtr,global int* hRowNextPtr,const int ldpcM,const int ldpcN,const int nonZeros,global bool* flags,global bool* isDones){
-    int batchInd=get_global_id(0);
-    if(isDones[batchInd])
-        return;
-    int nodeInd=get_global_id(1);//nonZeros
-    if(nodeInd<ldpcM){//nodeInd = row;
-        //init the matrixM to 0;
-        bool result=0;
-        for(int ptr=hRowFirstPtr[nodeInd];ptr!=-1;ptr=hRowNextPtr[ptr]){
-            //ptr is the node location;
-            if(srcBool[batchInd*ldpcN+hCols[ptr]])
-                result^=1;
-        }
-        if(flags[batchInd])
-            return;
-        if(result){
-            flags[batchInd]=1;
-        }
-    }
-}
-
 
 //before refreshQ, check the batchInd is done or not;
-kernel void refreshQMS(global int* hCols,global bool* lQA,global float* lQB,global float* lR,global float* lPostP,const int ldpcN, const int nonZeros,global bool* flags,global bool* isDones){
+kernel void refreshQMS(global int* hCols,global float* lQ,global float* lR,global float* lPostP,const int ldpcN, const int nonZeros,global bool* flags,global bool* isDones){
     int batchInd=get_global_id(0);
     if(isDones[batchInd])
         return;
@@ -204,10 +182,7 @@ kernel void refreshQMS(global int* hCols,global bool* lQA,global float* lQB,glob
         isDones[batchInd]=1;
 
     int hCol=hCols[nodeInd];
-    float lQ;
-    lQ=lPostP[batchInd*ldpcN+hCol]-lR[batchInd*nonZeros+nodeInd];
-    lQA[batchInd*nonZeros+nodeInd]=(lQ<0);
-    lQB[batchInd*nonZeros+nodeInd]=fabs(lQ);
+    lQ[batchInd*nonZeros+nodeInd]=lPostP[batchInd*ldpcN+hCol]-lR[batchInd*nonZeros+nodeInd];
 }
 
 kernel void toChar(global bool* srcBool,global char* srcCode,const int ldpcN,const int ldpcK){
@@ -251,9 +226,9 @@ kernel void decodeInitTDMP(global int* hCols,global float* postCodes,global floa
 
 kernel void refreshRTDMP(global int* hRows,global float* lQ, global float* lR,global int* hRowFirstPtr,global int* hRowNextPtr,const int nonZeros,global bool* isDones,const int blockHeavy,const int offset){
     int batchInd=get_global_id(0);
-    int nodeInd=get_global_id(1);//blockHeavy
     if(isDones[batchInd])
         return;
+    int nodeInd=get_global_id(1);//blockHeavy
     if(nodeInd<blockHeavy){
         int newNodeInd=nodeInd+offset;
         int hRow=hRows[newNodeInd];
@@ -322,4 +297,12 @@ kernel void refreshQTDMP(global int* hCols,global float* lQ,global float* lR,glo
     int newNodeInd=nodeInd+offset;
     int hCol=hCols[newNodeInd];
     lQ[batchInd*blockHeavy+nodeInd]=lPostP[batchInd*ldpcN+hCol]-lR[batchInd*nonZeros+newNodeInd];
+}
+
+
+
+kernel void checkDones(global bool*flags,global bool*isDones){
+    int batchInd=get_global_id(0);
+    if(flags[batchInd]==0)
+        isDones[batchInd]=1;
 }

@@ -22,7 +22,7 @@ int main(int argc, char ** argv) {
 	const enum rate_type rate = rate_5_6;
 
 	Coder coder(ldpcK, ldpcN, rate);
-	//srand(time(0));
+	srand(time(0));
 
 	int srcLength = atoi(argv[1]);
 	//int srcLength = 10;
@@ -43,7 +43,7 @@ int main(int argc, char ** argv) {
 	coder.encode(srcCode, priorCode, srcLength);
 	end = clock();
 	double encodeTime = (double) (end - start) / CLOCKS_PER_SEC;
-	cout << "encode time=" << encodeTime << endl;
+	//cout << "encode time=" << encodeTime << endl;
 
 	coder.test(priorCode, postCode, coder.getPriorCodeLength(srcLength),
 			atof(argv[3]));
