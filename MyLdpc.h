@@ -35,7 +35,7 @@ enum rate_type {
 };
 
 enum decodeType {
-	DecodeCPU, DecodeMS, DecodeSP, DecodeTDMP
+	DecodeCPU, DecodeMS, DecodeSP, DecodeTDMP,DecodeTDMPCL,DecodeMSCL
 };
 const char h_seed_1_2[] = { -1, 94, 73, -1, -1, -1, -1, -1, 55, 83, -1, -1, 7,
 		0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 27, -1, -1, -1, 22, 79,
@@ -138,8 +138,15 @@ private:
 			int srcLength);
 	int decodeOnceTDMP(float * postCode, char * src, int postCodeLength,
 			int srcLength);
+	int decodeOnceTDMPCL(float * postCode, char * src, int postCodeLength,
+			int srcLength);
+	int decodeOnceMSCL(float * postCode, char * src, int postCodeLength,
+			int srcLength);
 	int decodeNoCL(float * postCode, char * srcCode, int srcLength);
 	int decodeCPU(float * postCode, char * srcCode, int srcLength);
+
+	int maxColWt;
+	int maxRowWt;
 	int srcLength;
 	int codeLength;
 	int ldpcK;
@@ -205,8 +212,12 @@ private:
 	cl::Buffer memIsDones;
 
 	cl::Buffer memHRowRange;
+	cl::Buffer memHSeed;
 
 	//create kernel
+	cl::Kernel kerDecodeOnceTDMP;
+	cl::Kernel kerDecodeOnceMS;
+
 	cl::Kernel kerDecodeInit;
 	cl::Kernel kerRefreshR;
 	cl::Kernel kerRefreshQ;
@@ -324,7 +335,7 @@ SparseMatrix<Dtype> dense2Sparse(const Matrix<Dtype, Dynamic, Dynamic> &dm) {
 }
 }
 char * load_program_source(const char *filename);
-float gaussian(float ave, float VAR);
+float gaussian(float ave, float sd);
 
 const char* openclErr2Str(cl_int error);
 

@@ -7,6 +7,7 @@
 
 #include<iostream>
 #include<time.h>
+#include"cl.hpp"
 #include "MyLdpc.h"
 using namespace std;
 
@@ -15,14 +16,21 @@ int main(int argc, char ** argv) {
 	if (argc != 5)
 		return 0;
 	clock_t start, end;
-	const int z = 24;
+	const int z = 48;
+	//const int z = 24;
 	const int ldpcN = z * 24;
+	//const int ldpcK = ldpcN / 2 * 1;
 	const int ldpcK = ldpcN / 6 * 5;
 	const int ldpcM = ldpcN - ldpcK;
 	const enum rate_type rate = rate_5_6;
+	//const enum rate_type rate = rate_1_2;
 
 	Coder coder(ldpcK, ldpcN, rate);
 	srand(time(0));
+
+	//srand(atoi(argv[5]));
+	float throughPut;
+	int errNum;
 
 	int srcLength = atoi(argv[1]);
 	//int srcLength = 10;
@@ -45,8 +53,10 @@ int main(int argc, char ** argv) {
 	double encodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 	//cout << "encode time=" << encodeTime << endl;
 
-	coder.test(priorCode, postCode, coder.getPriorCodeLength(srcLength),
-			atof(argv[3]));
+	float snr = atof(argv[3]);
+	float sd = 1 / (pow(10, snr / 20));
+	cout << "sd=" << sd << endl;
+	coder.test(priorCode, postCode, coder.getPriorCodeLength(srcLength), sd);
 
 	if (!strcmp(argv[4], "SP")) {
 		coder.addDecodeType(DecodeSP);
@@ -55,26 +65,14 @@ int main(int argc, char ** argv) {
 		end = clock();
 		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 		cout << "SP:" << decodeTime << endl;
-		int errNum = 0;
-		for (int i = 0; i < srcLength; ++i) {
-			if (srcCode[i] != newSrcCode[i])
-				++errNum;
-		}
-		cout << "ErrNum=" << errNum << endl;
-	} else if (!strcmp(argv[4],"MS")){
+	} else if (!strcmp(argv[4], "MS")) {
 		coder.addDecodeType(DecodeMS);
 		start = clock();
 		coder.decode(postCode, newSrcCode, srcLength, DecodeMS);
 		end = clock();
 		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 		cout << "MS:" << decodeTime << endl;
-		int errNum = 0;
-		for (int i = 0; i < srcLength; ++i) {
-			if (srcCode[i] != newSrcCode[i])
-				++errNum;
-		}
-		cout << "ErrNum=" << errNum << endl;
-	} else if (!strcmp(argv[4],"CPU")){
+	} else if (!strcmp(argv[4], "CPU")) {
 		coder.addDecodeType(DecodeCPU);
 		start = clock();
 		start = clock();
@@ -82,30 +80,39 @@ int main(int argc, char ** argv) {
 		end = clock();
 		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 		cout << "CPU:" << decodeTime << endl;
-		int errNum = 0;
-		for (int i = 0; i < srcLength; ++i) {
-			if (srcCode[i] != newSrcCode[i])
-				++errNum;
-		}
-		cout << "ErrNum=" << errNum << endl;
-	} else if (!strcmp(argv[4],"TDMP")){
+	} else if (!strcmp(argv[4], "TDMP")) {
 		coder.addDecodeType(DecodeTDMP);
 		start = clock();
 		coder.decode(postCode, newSrcCode, srcLength, DecodeTDMP);
 		end = clock();
 		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
 		cout << "TDMP:" << decodeTime << endl;
-		int errNum = 0;
-		for (int i = 0; i < srcLength; ++i) {
-			if (srcCode[i] != newSrcCode[i])
-				++errNum;
-		}
-		cout << "ErrNum=" << errNum << endl;
+	} else if (!strcmp(argv[4], "TDMPCL")) {
+		coder.addDecodeType(DecodeTDMPCL);
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeTDMPCL);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "TDMPCL:" << decodeTime << endl;
+	} else if (!strcmp(argv[4], "MSCL")) {
+		coder.addDecodeType(DecodeMSCL);
+		start = clock();
+		coder.decode(postCode, newSrcCode, srcLength, DecodeMSCL);
+		end = clock();
+		decodeTime = (double) (end - start) / CLOCKS_PER_SEC;
+		cout << "MSCL:" << decodeTime << endl;
 	}
+	errNum = 0;
+	for (int i = 0; i < srcLength; ++i) {
+		if (srcCode[i] != newSrcCode[i])
+			++errNum;
+	}
+	cout << "ErrNum=" << errNum << endl;
+	throughPut = srcLength / decodeTime;
+	cout << "ThroughPut=" << throughPut << endl;
 
 	free(srcCode);
 	free(priorCode);
 	free(postCode);
 	free(newSrcCode);
 }
-
