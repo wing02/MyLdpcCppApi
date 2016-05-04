@@ -304,7 +304,7 @@ kernel void checkDones(global bool*flags,global bool*isDones){
 #define maxSeedRowLength 12
 #define maxColWt    24
 
-kernel void decodeOnceTDMP(global float* postCode,global char* srcCode,const char z,const char seedRowLength,global char* hSeed,local float* lP,local bool* srcBool,local bool* flag){
+kernel void decodeOnceTDMP(global float* postCode,global char* srcCode,const char z,const char seedRowLength,constant char* hSeed,local float* lP,local bool* srcBool,local bool* flag){
     int groupId=get_group_id(0);
     char localId=get_local_id(0);//0 to z-1;
     short colMatrix[maxSeedRowLength][maxColWt];
@@ -421,6 +421,8 @@ kernel void decodeOnceTDMP(global float* postCode,global char* srcCode,const cha
         }
 
     }
+//    if(localId==0)
+//        printf("Time=%d\n",time);
 }
 
 

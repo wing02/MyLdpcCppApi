@@ -16,14 +16,14 @@ int main(int argc, char ** argv) {
 	if (argc != 5)
 		return 0;
 	clock_t start, end;
-	const int z = 48;
+	const int z = 24;
 	//const int z = 24;
 	const int ldpcN = z * 24;
-	//const int ldpcK = ldpcN / 2 * 1;
-	const int ldpcK = ldpcN / 6 * 5;
+	const int ldpcK = ldpcN / 4 * 3;
+	//const int ldpcK = ldpcN / 6 * 5;
 	const int ldpcM = ldpcN - ldpcK;
-	const enum rate_type rate = rate_5_6;
-	//const enum rate_type rate = rate_1_2;
+	//const enum rate_type rate = rate_5_6;
+	const enum rate_type rate = rate_3_4_b;
 
 	Coder coder(ldpcK, ldpcN, rate);
 	srand(time(0));

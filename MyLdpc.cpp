@@ -877,9 +877,6 @@ int Coder::decodeOnceMSCL(float * postCode, char * srcCode,
 	errNum = queue.enqueueNDRangeKernel(kerDecodeOnceMS, cl::NullRange,
 			cl::NDRange(batchSizeOnce * z,ldpcM/z), cl::NDRange(z,ldpcM/z),
 			new std::vector<cl::Event>(1, eventWriteBuffer), &eventDecode);
-//	errNum = queue.enqueueNDRangeKernel(kerDecodeOnceMS, cl::NullRange,
-//			cl::NDRange(batchSizeOnce * ldpcM), cl::NDRange(ldpcM),
-//			new std::vector<cl::Event>(1, eventWriteBuffer), &eventDecode);
 	queue.finish();
 	errNum = queue.enqueueReadBuffer(memSrcCode, CL_TRUE, 0,
 			srcLength * sizeof(char), srcCode,

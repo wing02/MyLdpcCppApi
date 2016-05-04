@@ -126,6 +126,7 @@ public:
 	int getCodeSize(int srcLength);
 
 	Eigen::SparseMatrix<DataType,Eigen::RowMajor> checkMatrix;
+	const char * kernelSourceCode;
 private:
 	int times;
 	const char * hSeed;
